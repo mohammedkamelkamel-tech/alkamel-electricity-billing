@@ -45,7 +45,7 @@ class ReadingReminderWorker(ctx: Context, params: WorkerParameters) : Worker(ctx
                 }
                 val notification = builder
                     .setSmallIcon(android.R.drawable.ic_dialog_info)
-                    .setContentTitle("الكامل للفواتير والتحصيل")
+                    .setContentTitle("العجاج للفواتير والتحصيل")
                     .setContentText("حان وقت مراجعة قراءات العدادات وإصدار الفواتير")
                     .setContentIntent(pending)
                     .setAutoCancel(true)
