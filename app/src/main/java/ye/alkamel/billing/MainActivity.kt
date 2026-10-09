@@ -45,7 +45,7 @@ class MainActivity : Activity() {
             hint = "قيمة الفاتورة (ريال)"
             inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
             textSize = 16f
-            singleLine = true
+            setSingleLine(true)
         }
         root.addView(amountInput, matchWrap())
         root.addView(Button(this).apply {
