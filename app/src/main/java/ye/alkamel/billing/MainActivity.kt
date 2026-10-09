@@ -1,403 +1,97 @@
 package ye.alkamel.billing
 
-import android.app.Activity
-import android.app.AlertDialog
+import android.app.*
+import android.content.*
+import android.net.Uri
 import android.os.Bundle
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
-import android.view.View
-import android.view.ViewGroup
 import android.widget.*
+import androidx.work.*
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import java.util.*
+import java.util.concurrent.TimeUnit
 
 class MainActivity : Activity() {
-    private val prefs by lazy { getSharedPreferences("alkamel_local_db", MODE_PRIVATE) }
-    private val bg = Color.rgb(246, 248, 251)
-    private val ink = Color.rgb(31, 43, 58)
-    private val muted = Color.rgb(112, 124, 139)
-    private val green = Color.rgb(19, 105, 82)
-    private val paleGreen = Color.rgb(226, 243, 236)
-    private val orange = Color.rgb(222, 133, 42)
-    private lateinit var root: LinearLayout
-    private lateinit var body: LinearLayout
-    private lateinit var nav: LinearLayout
-    private var page = "الرئيسية"
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        window.statusBarColor = green
-        window.navigationBarColor = Color.rgb(24, 30, 37)
-        window.decorView.layoutDirection = View.LAYOUT_DIRECTION_RTL
-        root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(bg)
-            layoutDirection = View.LAYOUT_DIRECTION_RTL
-        }
-        setContentView(root)
-        render()
-    }
-
-    private fun render() {
-        root.removeAllViews()
-        root.addView(header(), lp(-1, -2))
-        val scroll = ScrollView(this).apply { fillViewport = true }
-        body = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(14), dp(18), dp(24))
-        }
-        scroll.addView(body)
-        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        when (page) {
-            "الرئيسية" -> dashboard()
-            "المشتركون" -> subscribersPage()
-            "الفواتير" -> invoicesPage()
-            "التقارير" -> reportsPage()
-        }
-        root.addView(bottomNav(), lp(-1, dp(66)))
-    }
-
-    private fun header(): View {
-        val bar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(18), dp(14), dp(18), dp(14))
-            setBackgroundColor(green)
-        }
-        val titles = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        titles.addView(text("الكامل", 23f, Color.WHITE, true))
-        titles.addView(text("للفواتير والتحصيل", 12f, Color.rgb(215, 237, 229)))
-        bar.addView(titles, LinearLayout.LayoutParams(0, -2, 1f))
-        val settings = TextView(this).apply {
-            text = "⚙"
-            textSize = 24f
-            gravity = Gravity.CENTER
-            setTextColor(Color.WHITE)
-            setOnClickListener { settingsDialog() }
-        }
-        bar.addView(settings, lp(dp(42), dp(42)))
-        return bar
-    }
-
-    private fun dashboard() {
-        body.addView(text("أهلًا بك 👋", 23f, ink, true))
-        body.addView(text("ملخص نشاطك المالي اليوم", 14f, muted), lp(-1, -2, 0, 4, 0, 16))
-        val invoices = read("invoices")
-        val customers = read("customers")
-        var total = 0.0; var paid = 0.0
-        for (i in 0 until invoices.length()) {
-            val x = invoices.optJSONObject(i) ?: continue
-            val amount = x.optDouble("amount")
-            total += amount
-            if (x.optBoolean("paid")) paid += amount
-        }
-        val outstanding = total - paid
-        val stats = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val row1 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        row1.addView(statCard("إجمالي الفواتير", money(total), "▤", green), LinearLayout.LayoutParams(0, dp(112), 1f))
-        row1.addView(spaceW(10))
-        row1.addView(statCard("المبالغ المحصلة", money(paid), "✓", Color.rgb(40, 139, 102)), LinearLayout.LayoutParams(0, dp(112), 1f))
-        val row2 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        row2.addView(statCard("المتبقي للتحصيل", money(outstanding), "◷", orange), LinearLayout.LayoutParams(0, dp(112), 1f))
-        row2.addView(spaceW(10))
-        row2.addView(statCard("عدد المشتركين", customers.length().toString(), "♙", Color.rgb(75, 105, 171)), LinearLayout.LayoutParams(0, dp(112), 1f))
-        stats.addView(row1, lp(-1, -2))
-        stats.addView(spaceH(10))
-        stats.addView(row2, lp(-1, -2))
-        body.addView(stats, lp(-1, -2))
-        body.addView(sectionTitle("إجراءات سريعة"), lp(-1, -2, 0, 22, 0, 10))
-        val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        actions.addView(actionButton("＋ فاتورة جديدة", green) { showAddInvoice() }, LinearLayout.LayoutParams(0, dp(52), 1f))
-        actions.addView(spaceW(10))
-        actions.addView(actionButton("＋ مشترك جديد", Color.rgb(65, 87, 124)) { showAddCustomer() }, LinearLayout.LayoutParams(0, dp(52), 1f))
-        body.addView(actions, lp(-1, -2))
-        body.addView(sectionTitle("أحدث الفواتير", "عرض الكل") { page = "الفواتير"; render() }, lp(-1, -2, 0, 24, 0, 8))
-        if (invoices.length() == 0) {
-            body.addView(emptyState("لا توجد فواتير حتى الآن", "ابدأ بإضافة أول فاتورة للمشتركين."), lp(-1, -2))
-        } else {
-            var shown = 0
-            for (i in invoices.length() - 1 downTo 0) {
-                if (shown++ >= 4) break
-                body.addView(invoiceCard(invoices.optJSONObject(i) ?: continue), lp(-1, -2, 0, 0, 0, 9))
-            }
-        }
-    }
-
-    private fun subscribersPage() {
-        body.addView(sectionTitle("إدارة المشتركين"), lp(-1, -2, 0, 2, 0, 12))
-        body.addView(actionButton("＋ إضافة مشترك جديد", green) { showAddCustomer() }, lp(-1, dp(50), 0, 0, 0, 14))
-        val customers = read("customers")
-        if (customers.length() == 0) body.addView(emptyState("قائمة المشتركين فارغة", "أضف بيانات المشتركين لتسهيل إصدار الفواتير لهم."), lp(-1, -2))
-        for (i in customers.length() - 1 downTo 0) {
-            val c = customers.optJSONObject(i) ?: continue
-            val card = card()
-            card.addView(text(c.optString("name"), 17f, ink, true))
-            val phone = c.optString("phone")
-            if (phone.isNotBlank()) card.addView(text("الهاتف: $phone", 13f, muted), lp(-1, -2, 0, 5, 0, 0))
-            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-            row.addView(text("إصدار فاتورة لهذا المشترك", 13f, green), LinearLayout.LayoutParams(0, dp(40), 1f))
-            row.addView(smallButton("فاتورة") { showAddInvoice(c.optString("name")) })
-            card.addView(row, lp(-1, -2, 0, 6, 0, 0))
-            body.addView(card, lp(-1, -2, 0, 0, 0, 10))
-        }
-    }
-
-    private fun invoicesPage() {
-        body.addView(sectionTitle("الفواتير"), lp(-1, -2, 0, 2, 0, 12))
-        body.addView(actionButton("＋ إنشاء فاتورة", green) { showAddInvoice() }, lp(-1, dp(50), 0, 0, 0, 14))
-        val invoices = read("invoices")
-        if (invoices.length() == 0) body.addView(emptyState("لا توجد فواتير", "ستظهر الفواتير هنا مرتبة من الأحدث إلى الأقدم."), lp(-1, -2))
-        for (i in invoices.length() - 1 downTo 0) {
-            body.addView(invoiceCard(invoices.optJSONObject(i) ?: continue), lp(-1, -2, 0, 0, 0, 10))
-        }
-    }
-
-    private fun reportsPage() {
-        body.addView(sectionTitle("التقارير المالية"), lp(-1, -2, 0, 2, 0, 12))
-        val invoices = read("invoices")
-        var total = 0.0; var paid = 0.0; var countPaid = 0; var countDue = 0
-        for (i in 0 until invoices.length()) {
-            val x = invoices.optJSONObject(i) ?: continue
-            total += x.optDouble("amount")
-            if (x.optBoolean("paid")) { paid += x.optDouble("amount"); countPaid++ } else countDue++
-        }
-        val card = card()
-        card.addView(text("ملخص الفواتير", 18f, ink, true))
-        reportLine(card, "عدد الفواتير", invoices.length().toString())
-        reportLine(card, "الفواتير المسددة", countPaid.toString())
-        reportLine(card, "الفواتير غير المسددة", countDue.toString())
-        reportLine(card, "الإجمالي", money(total))
-        reportLine(card, "المحصّل", money(paid))
-        reportLine(card, "المتبقي", money(total - paid))
-        body.addView(card, lp(-1, -2))
-        body.addView(text("تُحسب التقارير من البيانات المحفوظة على هذا الجهاز.", 12f, muted), lp(-1, -2, 0, 12, 0, 0))
-    }
-
-    private fun invoiceCard(item: JSONObject): View {
-        val c = card()
-        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        val info = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        info.addView(text(item.optString("name"), 17f, ink, true))
-        val date = SimpleDateFormat("yyyy/MM/dd - hh:mm a", Locale.getDefault()).format(Date(item.optLong("createdAt")))
-        info.addView(text(date, 12f, muted), lp(-1, -2, 0, 4, 0, 0))
-        row.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
-        val paid = item.optBoolean("paid")
-        row.addView(pill(if (paid) "مسددة" else "غير مسددة", if (paid) paleGreen else Color.rgb(255, 241, 220), if (paid) green else Color.rgb(161, 93, 20)))
-        c.addView(row, lp(-1, -2))
-        c.addView(text(money(item.optDouble("amount")) + " ريال", 20f, green, true), lp(-1, -2, 0, 12, 0, 0))
-        val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        if (!paid) buttons.addView(smallButton("تسجيل التحصيل") { markPaid(item.optLong("id")) })
-        buttons.addView(spaceW(8))
-        buttons.addView(smallButton("حذف") { confirmDelete(item.optLong("id")) })
-        c.addView(buttons, lp(-1, -2, 0, 10, 0, 0))
-        return c
-    }
-
-    private fun showAddCustomer() {
-        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(22), dp(8), dp(22), 0) }
-        val name = EditText(this).apply { hint = "اسم المشترك"; setSingleLine(true) }
-        val phone = EditText(this).apply { hint = "رقم الهاتف (اختياري)"; inputType = android.text.InputType.TYPE_CLASS_PHONE; setSingleLine(true) }
-        box.addView(name); box.addView(phone)
-        AlertDialog.Builder(this).setTitle("إضافة مشترك").setView(box)
-            .setNegativeButton("إلغاء", null)
-            .setPositiveButton("حفظ", null).create().also { dialog ->
-                dialog.setOnShowListener {
-                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                        val n = name.text.toString().trim()
-                        if (n.isEmpty()) { name.error = "أدخل اسم المشترك"; return@setOnClickListener }
-                        val arr = read("customers")
-                        arr.put(JSONObject().put("id", System.currentTimeMillis()).put("name", n).put("phone", phone.text.toString().trim()))
-                        save("customers", arr)
-                        dialog.dismiss()
-                        render()
-                    }
-                }
-                dialog.show()
-            }
-    }
-
-    private fun showAddInvoice(prefill: String = "") {
-        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(22), dp(8), dp(22), 0) }
-        val name = EditText(this).apply { hint = "اسم المشترك"; setSingleLine(true); setText(prefill) }
-        val amount = EditText(this).apply {
-            hint = "قيمة الفاتورة بالريال"
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
-            setSingleLine(true)
-        }
-        box.addView(name); box.addView(amount)
-        AlertDialog.Builder(this).setTitle("إنشاء فاتورة جديدة").setView(box)
-            .setNegativeButton("إلغاء", null).setPositiveButton("حفظ", null).create().also { dialog ->
-                dialog.setOnShowListener {
-                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                        val n = name.text.toString().trim()
-                        val a = amount.text.toString().trim().toDoubleOrNull()
-                        if (n.isEmpty()) { name.error = "أدخل اسم المشترك"; return@setOnClickListener }
-                        if (a == null || a <= 0) { amount.error = "أدخل مبلغًا صحيحًا"; return@setOnClickListener }
-                        val arr = read("invoices")
-                        arr.put(JSONObject().put("id", System.currentTimeMillis()).put("name", n)
-                            .put("amount", a).put("paid", false).put("createdAt", System.currentTimeMillis()))
-                        save("invoices", arr)
-                        dialog.dismiss()
-                        render()
-                    }
-                }
-                dialog.show()
-            }
-    }
-
-    private fun markPaid(id: Long) {
-        val arr = read("invoices")
-        for (i in 0 until arr.length()) {
-            val item = arr.optJSONObject(i) ?: continue
-            if (item.optLong("id") == id) { item.put("paid", true); item.put("paidAt", System.currentTimeMillis()); break }
-        }
-        save("invoices", arr)
-        render()
-        Toast.makeText(this, "تم تسجيل التحصيل", Toast.LENGTH_SHORT).show()
-    }
-
-    private fun confirmDelete(id: Long) {
-        AlertDialog.Builder(this).setTitle("حذف الفاتورة")
-            .setMessage("هل أنت متأكد من حذف هذه الفاتورة؟")
-            .setNegativeButton("إلغاء", null).setPositiveButton("حذف") { _, _ ->
-                val old = read("invoices"); val next = JSONArray()
-                for (i in 0 until old.length()) {
-                    val x = old.optJSONObject(i) ?: continue
-                    if (x.optLong("id") != id) next.put(x)
-                }
-                save("invoices", next); render()
-            }.show()
-    }
-
-    private fun settingsDialog() {
-        val options = arrayOf("معلومات التطبيق", "النسخ الاحتياطي")
-        AlertDialog.Builder(this).setTitle("الإعدادات").setItems(options) { _, which ->
-            if (which == 0) AlertDialog.Builder(this).setTitle("الكامل للفواتير والتحصيل")
-                .setMessage("تطبيق محلي لإدارة المشتركين والفواتير والتحصيل. البيانات الحالية محفوظة على الجهاز.")
-                .setPositiveButton("حسنًا", null).show()
-            else AlertDialog.Builder(this).setTitle("النسخ الاحتياطي")
-                .setMessage("ميزة تصدير النسخ الاحتياطية واستعادتها ستُضاف ضمن استكمال وظائف التطبيق. لا تعتبر هذه الشاشة بديلًا عن النسخة الاحتياطية.")
-                .setPositiveButton("حسنًا", null).show()
-        }.show()
-    }
-
-    private fun bottomNav(): View {
-        nav = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            setBackgroundColor(Color.WHITE)
-            elevation = dp(8).toFloat()
-        }
-        val items = listOf("الرئيسية" to "⌂", "المشتركون" to "♙", "الفواتير" to "▤", "التقارير" to "▥")
-        for ((label, icon) in items) {
-            val active = page == label
-            val item = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER
-                setPadding(0, dp(7), 0, dp(5))
-                setOnClickListener { page = label; render() }
-            }
-            item.addView(TextView(this).apply {
-                text = icon; textSize = 21f; gravity = Gravity.CENTER
-                setTextColor(if (active) green else muted)
-            })
-            item.addView(TextView(this).apply {
-                text = label; textSize = 11f; gravity = Gravity.CENTER
-                setTypeface(null, if (active) Typeface.BOLD else Typeface.NORMAL)
-                setTextColor(if (active) green else muted)
-            })
-            nav.addView(item, LinearLayout.LayoutParams(0, -1, 1f))
-        }
-        return nav
-    }
-
-    private fun statCard(title: String, value: String, symbol: String, accent: Int): View {
-        val c = card().apply { setPadding(dp(12), dp(12), dp(12), dp(10)) }
-        val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        val icon = TextView(this).apply {
-            text = symbol; textSize = 17f; gravity = Gravity.CENTER; setTextColor(accent)
-            background = shape(if (accent == orange) Color.rgb(255, 241, 220) else paleGreen, 12)
-        }
-        top.addView(icon, lp(dp(34), dp(34)))
-        top.addView(spaceW(7))
-        top.addView(text(title, 11f, muted), LinearLayout.LayoutParams(0, -2, 1f))
-        c.addView(top)
-        c.addView(text(value, 17f, ink, true), lp(-1, -2, 0, 12, 0, 0))
-        return c
-    }
-
-    private fun sectionTitle(title: String, action: String? = null, onAction: (() -> Unit)? = null): View {
-        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        row.addView(text(title, 18f, ink, true), LinearLayout.LayoutParams(0, -2, 1f))
-        if (action != null && onAction != null) row.addView(TextView(this).apply {
-            text = action; textSize = 13f; setTextColor(green); setPadding(dp(8), dp(8), 0, dp(8)); setOnClickListener { onAction() }
-        })
-        return row
-    }
-
-    private fun emptyState(title: String, subtitle: String): View {
-        val c = card().apply { gravity = Gravity.CENTER; setPadding(dp(18), dp(26), dp(18), dp(26)) }
-        c.addView(TextView(this).apply { text = "▤"; textSize = 32f; setTextColor(green); gravity = Gravity.CENTER })
-        c.addView(TextView(this).apply { text = title; textSize = 16f; setTextColor(ink); setTypeface(null, Typeface.BOLD); gravity = Gravity.CENTER; setPadding(0, dp(8), 0, dp(5)) })
-        c.addView(TextView(this).apply { text = subtitle; textSize = 13f; setTextColor(muted); gravity = Gravity.CENTER })
-        return c
-    }
-
-    private fun card(): LinearLayout = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        setPadding(dp(15), dp(14), dp(15), dp(14))
-        background = shape(Color.WHITE, 18)
-        elevation = dp(2).toFloat()
-    }
-
-    private fun pill(label: String, color: Int, fg: Int): View = TextView(this).apply {
-        text = label; textSize = 11f; setTextColor(fg); gravity = Gravity.CENTER
-        setPadding(dp(10), dp(6), dp(10), dp(6)); background = shape(color, 20)
-    }
-
-    private fun actionButton(label: String, color: Int, action: () -> Unit): View = TextView(this).apply {
-        text = label; textSize = 14f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
-        setTypeface(null, Typeface.BOLD); background = shape(color, 14); elevation = dp(1).toFloat()
-        setOnClickListener { action() }
-    }
-
-    private fun smallButton(label: String, action: () -> Unit): View = TextView(this).apply {
-        text = label; textSize = 12f; setTextColor(green); gravity = Gravity.CENTER
-        setPadding(dp(12), dp(9), dp(12), dp(9)); background = shape(paleGreen, 10)
-        setOnClickListener { action() }
-    }
-
-    private fun reportLine(parent: LinearLayout, label: String, value: String) {
-        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(11), 0, dp(11)) }
-        row.addView(text(label, 14f, muted), LinearLayout.LayoutParams(0, -2, 1f))
-        row.addView(text(value, 15f, ink, true))
-        parent.addView(row, lp(-1, -2))
-        val line = View(this).apply { setBackgroundColor(Color.rgb(235, 238, 242)) }
-        parent.addView(line, lp(-1, dp(1)))
-    }
-
-    private fun text(value: String, size: Float, color: Int, bold: Boolean = false) = TextView(this).apply {
-        text = value; textSize = size; setTextColor(color)
-        if (bold) setTypeface(null, Typeface.BOLD)
-        gravity = Gravity.CENTER_VERTICAL
-    }
-
-    private fun shape(color: Int, radius: Int) = GradientDrawable().apply {
-        setColor(color); cornerRadius = dp(radius).toFloat()
-    }
-
-    private fun read(key: String): JSONArray = try { JSONArray(prefs.getString(key, "[]")) } catch (_: Exception) { JSONArray() }
-    private fun save(key: String, arr: JSONArray) { prefs.edit().putString(key, arr.toString()).apply() }
-    private fun money(amount: Double): String = NumberFormat.getNumberInstance(Locale("ar", "YE")).apply { maximumFractionDigits = 2 }.format(amount)
-    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
-    private fun lp(w: Int, h: Int, l: Int = 0, t: Int = 0, r: Int = 0, b: Int = 0) =
-        LinearLayout.LayoutParams(w, h).apply { setMargins(dp(l), dp(t), dp(r), dp(b)) }
-    private fun spaceW(width: Int): View = View(this).apply { layoutParams = LinearLayout.LayoutParams(dp(width), 1) }
-    private fun spaceH(height: Int): View = View(this).apply { layoutParams = LinearLayout.LayoutParams(1, dp(height)) }
+ private val p by lazy { getSharedPreferences("alkamel_db", MODE_PRIVATE) }
+ private lateinit var root: LinearLayout
+ private lateinit var body: LinearLayout
+ private var page="الرئيسية"
+ private var chosen=""
+ private val green=Color.rgb(15,104,81); private val ink=Color.rgb(29,43,58); private val muted=Color.rgb(112,124,139); private val orange=Color.rgb(214,128,39)
+ private val folderReq=701; private val restoreReq=702
+ override fun onCreate(savedInstanceState:Bundle?){super.onCreate(savedInstanceState);window.statusBarColor=green;window.navigationBarColor=Color.rgb(25,30,36);window.decorView.layoutDirection=android.view.View.LAYOUT_DIRECTION_RTL
+  root=LinearLayout(this).apply{orientation=1;setBackgroundColor(Color.rgb(246,248,251));layoutDirection=android.view.View.LAYOUT_DIRECTION_RTL};setContentView(root);scheduleBackup();render()
+ }
+ private fun data(k:String)=try{JSONArray(p.getString(k,"[]"))}catch(e:Exception){JSONArray()}
+ private fun settings():JSONObject{val s=try{JSONObject(p.getString("settings","{}"))}catch(e:Exception){JSONObject()};if(!s.has("station"))s.put("station","الكامل للفواتير والتحصيل");if(!s.has("price"))s.put("price",170);if(!s.has("nextInvoice"))s.put("nextInvoice",1);if(!s.has("nextReceipt"))s.put("nextReceipt",1);if(!s.has("dueDays"))s.put("dueDays",15);return s}
+ private fun saveSettings(s:JSONObject){p.edit().putString("settings",s.toString()).apply()}
+ private fun save(k:String,a:JSONArray){p.edit().putString(k,a.toString()).apply()}
+ private fun id()=UUID.randomUUID().toString()
+ private fun find(a:JSONArray,key:String,value:String):JSONObject?{for(i in 0 until a.length()){val x=a.optJSONObject(i)?:continue;if(x.optString(key)==value)return x};return null}
+ private fun dp(n:Int)=(n*resources.displayMetrics.density).toInt()
+ private fun money(v:Double)=NumberFormat.getNumberInstance(Locale("ar","YE")).apply{maximumFractionDigits=2}.format(v)+" ريال"
+ private fun date(t:Long)=SimpleDateFormat("yyyy/MM/dd HH:mm",Locale.getDefault()).format(Date(t))
+ private fun lp(w:Int,h:Int,t:Int=0)=LinearLayout.LayoutParams(w,h).apply{topMargin=dp(t)}
+ private fun shape(c:Int,r:Int)=GradientDrawable().apply{setColor(c);cornerRadius=dp(r).toFloat()}
+ private fun label(s:String,size:Float=14f,color:Int=ink,bold:Boolean=false)=TextView(this).apply{text=s;textSize=size;setTextColor(color);gravity=Gravity.CENTER_VERTICAL;if(bold)setTypeface(null,Typeface.BOLD)}
+ private fun field(h:String,v:String="",num:Boolean=false)=EditText(this).apply{hint=h;setText(v);setSingleLine(true);textSize=15f;setPadding(dp(10),dp(8),dp(10),dp(8));background=shape(Color.WHITE,10);if(num)inputType=android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL}
+ private fun btn(s:String,color:Int=green,f:()->Unit)=TextView(this).apply{text=s;textSize=14f;setTextColor(Color.WHITE);gravity=Gravity.CENTER;setTypeface(null,Typeface.BOLD);background=shape(color,12);setPadding(dp(10),dp(12),dp(10),dp(12));setOnClickListener{f()}}
+ private fun card()=LinearLayout(this).apply{orientation=1;setPadding(dp(14),dp(12),dp(14),dp(12));background=shape(Color.WHITE,16);elevation=dp(2).toFloat()}
+ private fun line(c:LinearLayout,a:String,b:String){val r=LinearLayout(this).apply{orientation=0;gravity=Gravity.CENTER_VERTICAL};r.addView(label(a,13f,muted),LinearLayout.LayoutParams(0,dp(34),1f));r.addView(label(b,14f,ink,true));c.addView(r)}
+ private fun render(){root.removeAllViews();val head=LinearLayout(this).apply{orientation=0;gravity=Gravity.CENTER_VERTICAL;setPadding(dp(18),dp(13),dp(18),dp(13));setBackgroundColor(green)};val t=LinearLayout(this).apply{orientation=1};t.addView(label("الكامل",23f,Color.WHITE,true));t.addView(label("للفواتير والتحصيل",12f,Color.rgb(220,240,231)));head.addView(t,LinearLayout.LayoutParams(0,-2,1f));head.addView(label("⚙",23f,Color.WHITE,true).apply{setOnClickListener{page="الإعدادات";render()}},lp(dp(38),dp(40)));root.addView(head,lp(-1,-2))
+  val sc=ScrollView(this);body=LinearLayout(this).apply{orientation=1;setPadding(dp(16),dp(14),dp(16),dp(22))};sc.addView(body);root.addView(sc,LinearLayout.LayoutParams(-1,0,1f))
+  when(page){"الرئيسية"->home();"المشتركون"->customersPage();"الفواتير"->invoicesPage();"التحصيل"->receiptsPage();"التقارير"->reportsPage();"الإعدادات"->settingsPage();"كشف الحساب"->statementPage()}
+  val nav=LinearLayout(this).apply{orientation=0;gravity=Gravity.CENTER;background=Color.WHITE;elevation=dp(8).toFloat()};listOf("الرئيسية","المشتركون","الفواتير","التحصيل","التقارير").forEach{n->val item=LinearLayout(this).apply{orientation=1;gravity=Gravity.CENTER;setOnClickListener{page=n;render()};setPadding(0,dp(6),0,dp(5))};item.addView(label(if(n=="الرئيسية")"⌂" else if(n=="المشتركون")"♙" else if(n=="الفواتير")"▤" else if(n=="التحصيل")"ر" else "▥",20f,if(page==n)green else muted,true).apply{gravity=Gravity.CENTER});item.addView(label(n,10f,if(page==n)green else muted,page==n).apply{gravity=Gravity.CENTER});nav.addView(item,LinearLayout.LayoutParams(0,dp(58),1f))};root.addView(nav,lp(-1,dp(58))
+ }
+ private fun heading(a:String,b:String?=null){body.addView(label(a,22f,ink,true));if(b!=null)body.addView(label(b,13f,muted),lp(-1,-2,4))}
+ private fun empty(a:String,b:String)=card().apply{gravity=Gravity.CENTER;addView(label("▤",30f,green,true).apply{gravity=Gravity.CENTER});addView(label(a,16f,ink,true).apply{gravity=Gravity.CENTER},lp(-1,-2,7));addView(label(b,13f,muted).apply{gravity=Gravity.CENTER},lp(-1,-2,4))}
+ private fun home(){heading("مرحبًا بك 👋","إدارة المشتركين والفواتير والتحصيل");val cs=data("customers");val ia=data("invoices");var total=0.0;var paid=0.0;var due=0.0;for(i in 0 until ia.length()){val x=ia.optJSONObject(i)?:continue;total+=x.optDouble("total");paid+=x.optDouble("paid");due+=x.optDouble("remaining")}
+  val a=LinearLayout(this).apply{orientation=0};a.addView(stat("المشتركون",cs.length().toString(),green),LinearLayout.LayoutParams(0,dp(90),1f));a.addView(View(this),lp(dp(8),1));a.addView(stat("إجمالي الفواتير",money(total),Color.rgb(65,99,161)),LinearLayout.LayoutParams(0,dp(90),1f));body.addView(a,lp(-1,-2,12));val b=LinearLayout(this).apply{orientation=0};b.addView(stat("المحصّل",money(paid),green),LinearLayout.LayoutParams(0,dp(90),1f));b.addView(View(this),lp(dp(8),1));b.addView(stat("المتبقي",money(due),orange),LinearLayout.LayoutParams(0,dp(90),1f));body.addView(b,lp(-1,-2,8))
+  heading("إجراءات سريعة");body.addView(btn("＋ إضافة مشترك",Color.rgb(65,87,124)){customerForm()},lp(-1,dp(45),8));body.addView(btn("＋ إصدار فاتورة كهرباء"){invoiceForm()},lp(-1,dp(45),8));body.addView(btn("＋ تسجيل تحصيل",orange){receiptForm()},lp(-1,dp(45),8));body.addView(label("أحدث الفواتير",18f,ink,true),lp(-1,-2,20));if(ia.length()==0)body.addView(empty("لا توجد فواتير بعد","أضف مشتركًا ثم أصدر فاتورته."),lp(-1,-2,8));for(i in ia.length()-1 downTo maxOf(0,ia.length()-4))body.addView(invoiceCard(ia.optJSONObject(i)?:continue),lp(-1,-2,8))
+ }
+ private fun stat(a:String,b:String,c:Int)=card().apply{addView(label(a,12f,muted));addView(label(b,16f,c,true),lp(-1,-2,7))}
+ private fun watcher(f:()->Unit)=object:android.text.TextWatcher{override fun beforeTextChanged(s:CharSequence?,st:Int,c:Int,a:Int){};override fun onTextChanged(s:CharSequence?,st:Int,b:Int,c:Int){f()};override fun afterTextChanged(s:android.text.Editable?){}}
+ private fun customersPage(){heading("المشتركون","إدارة العدادات والأسعار والأرصدة");body.addView(btn("＋ إضافة مشترك"){customerForm()},lp(-1,dp(45),8));val q=field("بحث بالاسم أو رقم العداد");body.addView(q,lp(-1,dp(46),8));val list=LinearLayout(this).apply{orientation=1};body.addView(list)
+  fun fill(){list.removeAllViews();val a=data("customers");var n=0;for(i in a.length()-1 downTo 0){val c=a.optJSONObject(i)?:continue;if(!(c.optString("name")+" "+c.optString("meter")+" "+c.optString("phone")).contains(q.text.toString(),true))continue;n++;val box=card();box.addView(label(c.optString("name"),17f,ink,true));box.addView(label("العداد: "+c.optString("meter")+" • الهاتف: "+c.optString("phone"),12f,muted),lp(-1,-2,4));line(box,"سعر الكيلو",money(c.optDouble("price")));line(box,"المتأخرات",money(c.optDouble("arrears")));line(box,"الرصيد الدائن",money(c.optDouble("credit")));val r=LinearLayout(this).apply{orientation=0};r.addView(btn("فاتورة"){invoiceForm(c.optString("id"))},LinearLayout.LayoutParams(0,dp(40),1f));r.addView(View(this),lp(dp(5),1));r.addView(btn("كشف الحساب",Color.rgb(65,87,124)){chosen=c.optString("id");page="كشف الحساب";render()},LinearLayout.LayoutParams(0,dp(40),1f));r.addView(View(this),lp(dp(5),1));r.addView(btn("تعديل",Color.rgb(90,104,120)){customerForm(c)},LinearLayout.LayoutParams(0,dp(40),1f));box.addView(r,lp(-1,-2,9));list.addView(box,lp(-1,-2,0,0))};if(n==0)list.addView(empty("لا يوجد مشتركون","أضف مشتركًا أو غيّر البحث."),lp(-1,-2))}
+  q.addTextChangedListener(watcher{fill()});fill()
+ }
+ private fun customerForm(old:JSONObject?=null){val box=LinearLayout(this).apply{orientation=1};val n=field("اسم المشترك",old?.optString("name")?:"");val m=field("رقم العداد",old?.optString("meter")?:"");val ph=field("رقم الهاتف",old?.optString("phone")?:"");val pr=field("سعر الكيلو",(old?.optDouble("price")?:settings().optDouble("price")).toString(),true);val prev=field("القراءة السابقة",(old?.optDouble("prev")?:0.0).toString(),true);listOf("اسم المشترك" to n,"رقم العداد" to m,"رقم الهاتف" to ph,"سعر الكيلو" to pr,"القراءة السابقة" to prev).forEach{box.addView(label(it.first,12f,muted));box.addView(it.second,lp(-1,dp(44),2))}
+  val d=AlertDialog.Builder(this).setTitle(if(old==null)"إضافة مشترك" else "تعديل المشترك").setView(ScrollView(this).apply{addView(box)}).setNegativeButton("إلغاء",null).setPositiveButton("حفظ",null).create();d.setOnShowListener{d.getButton(-1).setOnClickListener{if(n.text.isBlank()||m.text.isBlank()){Toast.makeText(this,"الاسم ورقم العداد مطلوبان",Toast.LENGTH_SHORT).show();return@setOnClickListener};val a=data("customers");val c=old?:JSONObject().put("id",id()).put("arrears",0).put("credit",0);c.put("name",n.text.toString().trim()).put("meter",m.text.toString().trim()).put("phone",ph.text.toString().trim()).put("price",pr.text.toString().toDoubleOrNull()?:settings().optDouble("price")).put("prev",prev.text.toString().toDoubleOrNull()?:0.0);if(old==null)a.put(c)else for(i in 0 until a.length())if(a.optJSONObject(i)?.optString("id")==c.optString("id")){a.put(i,c);break};save("customers",a);d.dismiss();page="المشتركون";render()}};d.show()
+ }
+ private fun invoiceForm(customerId:String?=null){val a=data("customers");if(a.length()==0){Toast.makeText(this,"أضف مشتركًا أولًا",Toast.LENGTH_LONG).show();return};val cs=(0 until a.length()).mapNotNull{a.optJSONObject(it)};val box=LinearLayout(this).apply{orientation=1};val sp=Spinner(this);sp.adapter=ArrayAdapter(this,android.R.layout.simple_spinner_dropdown_item,cs.map{it.optString("name")+" — "+it.optString("meter")});val ix=cs.indexOfFirst{it.optString("id")==customerId};if(ix>=0)sp.setSelection(ix)
+  val current=field("القراءة الحالية","",true);val discount=field("الخصم","0",true);val payment=field("المدفوع الآن","0",true);val summary=card();val prev=label("القراءة السابقة: —");val arrears=label("المتأخرات: —");val credit=label("الرصيد الدائن: —");val energy=label("الاستهلاك: —");val total=label("الإجمالي: —",16f,green,true);val rem=label("المتبقي: —",15f,orange,true);listOf(prev,arrears,credit,energy,total,rem).forEach{summary.addView(it,lp(-1,-2,5))};box.addView(label("المشترك"));box.addView(sp,lp(-1,dp(45),2));box.addView(summary,lp(-1,-2,8,8));listOf("القراءة الحالية" to current,"الخصم" to discount,"المدفوع الآن" to payment).forEach{box.addView(label(it.first,12f,muted));box.addView(it.second,lp(-1,dp(44),2))}
+  var calc=JSONObject()
+  fun update(){val c=cs.getOrNull(sp.selectedItemPosition)?:return;val old=c.optDouble("prev");val cur=current.text.toString().toDoubleOrNull()?:old;val cons=(cur-old).coerceAtLeast(0.0);val energyVal=cons*c.optDouble("price");val disc=(discount.text.toString().toDoubleOrNull()?:0.0).coerceAtLeast(0.0);val arrearsVal=c.optDouble("arrears");val gross=(energyVal-disc).coerceAtLeast(0.0)+arrearsVal;val used=c.optDouble("credit").coerceAtLeast(0.0).coerceAtMost(gross);val tot=(gross-used).coerceAtLeast(0.0);val pay=(payment.text.toString().toDoubleOrNull()?:0.0).coerceAtLeast(0.0);val left=(tot-pay).coerceAtLeast(0.0);val excess=(pay-tot).coerceAtLeast(0.0);calc=JSONObject().put("old",old).put("cur",cur).put("cons",cons).put("energy",energyVal).put("discount",disc).put("arrears",arrearsVal).put("used",used).put("total",tot).put("paid",pay).put("remaining",left).put("excess",excess);prev.text="القراءة السابقة: "+old;arrears.text="المتأخرات السابقة: "+money(arrearsVal);credit.text="الرصيد الدائن: "+money(c.optDouble("credit"));energy.text="الاستهلاك: "+cons+" كيلو • قيمة الطاقة: "+money(energyVal);total.text="الإجمالي بعد التسوية: "+money(tot);rem.text="المتبقي بعد الدفع: "+money(left)}
+  sp.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener{override fun onNothingSelected(p:android.widget.AdapterView<*>?){};override fun onItemSelected(p:android.widget.AdapterView<*>?,v:android.view.View?,pos:Int,oid:Long){update()}};current.addTextChangedListener(watcher{update()});discount.addTextChangedListener(watcher{update()});payment.addTextChangedListener(watcher{update()});update()
+  val d=AlertDialog.Builder(this).setTitle("إصدار فاتورة كهرباء").setView(ScrollView(this).apply{addView(box)}).setNegativeButton("إلغاء",null).setPositiveButton("حفظ الفاتورة",null).create();d.setOnShowListener{d.getButton(-1).setOnClickListener{val c=cs.getOrNull(sp.selectedItemPosition)?:return@setOnClickListener;if(calc.optDouble("cur")<calc.optDouble("old")){Toast.makeText(this,"القراءة الحالية أقل من السابقة",Toast.LENGTH_LONG).show();return@setOnClickListener};c.put("prev",calc.optDouble("cur")).put("arrears",calc.optDouble("remaining")).put("credit",(c.optDouble("credit")-calc.optDouble("used")).coerceAtLeast(0.0)+calc.optDouble("excess"));val st=settings();val num=st.optInt("nextInvoice",1);st.put("nextInvoice",num+1);saveSettings(st);val inv=JSONObject().put("id",id()).put("number",num).put("subId",c.optString("id")).put("name",c.optString("name")).put("meter",c.optString("meter")).put("phone",c.optString("phone")).put("date",System.currentTimeMillis()).put("prev",calc.optDouble("old")).put("curr",calc.optDouble("cur")).put("cons",calc.optDouble("cons")).put("price",c.optDouble("price")).put("energy",calc.optDouble("energy")).put("discount",calc.optDouble("discount")).put("oldArrears",calc.optDouble("arrears")).put("creditUsed",calc.optDouble("used")).put("total",calc.optDouble("total")).put("paid",calc.optDouble("paid")).put("remaining",calc.optDouble("remaining")).put("excess",calc.optDouble("excess"));val ia=data("invoices");ia.put(inv);save("invoices",ia);save("customers",a);d.dismiss();showInvoice(inv)}};d.show()
+ }
+ private fun invoicesPage(){heading("الفواتير","الفواتير الأحدث أولًا");body.addView(btn("＋ إصدار فاتورة كهرباء"){invoiceForm()},lp(-1,dp(45),8));val q=field("بحث باسم المشترك أو رقم الفاتورة");body.addView(q,lp(-1,dp(45),8));val list=LinearLayout(this).apply{orientation=1};body.addView(list);fun fill(){list.removeAllViews();val a=data("invoices");var n=0;for(i in a.length()-1 downTo 0){val x=a.optJSONObject(i)?:continue;if(!(x.optString("name")+" "+x.optString("number")).contains(q.text.toString(),true))continue;n++;list.addView(invoiceCard(x),lp(-1,-2,8))};if(n==0)list.addView(empty("لا توجد فواتير","أصدر فاتورة من الزر أعلاه."),lp(-1,-2))};q.addTextChangedListener(watcher{fill()});fill()}
+ private fun invoiceCard(x:JSONObject):View{val c=card();c.addView(label("فاتورة #"+x.optInt("number")+" • "+x.optString("name"),16f,ink,true));c.addView(label("العداد "+x.optString("meter")+" • "+date(x.optLong("date")),12f,muted),lp(-1,-2,4));line(c,"الإجمالي",money(x.optDouble("total")));line(c,"المدفوع",money(x.optDouble("paid")));line(c,"المتبقي",money(x.optDouble("remaining")));c.addView(label(if(x.optDouble("remaining")<=0)"● مسددة" else if(x.optDouble("paid")>0)"● مسددة جزئيًا" else "● غير مسددة",12f,if(x.optDouble("remaining")<=0)green else orange,true),lp(-1,-2,4));c.addView(btn("عرض الفاتورة / واتساب / طباعة"){showInvoice(x)},lp(-1,dp(42),8));return c}
+ private fun invoiceText(x:JSONObject)=settings().optString("station")+"\nفاتورة كهرباء رقم: "+x.optInt("number")+"\nالمشترك: "+x.optString("name")+"\nالعداد: "+x.optString("meter")+"\nالقراءة السابقة: "+x.optDouble("prev")+"\nالقراءة الحالية: "+x.optDouble("curr")+"\nالاستهلاك: "+x.optDouble("cons")+" كيلو\nقيمة الاستهلاك: "+money(x.optDouble("energy"))+"\nالمتأخرات السابقة: "+money(x.optDouble("oldArrears"))+"\nالخصم: "+money(x.optDouble("discount"))+"\nالإجمالي: "+money(x.optDouble("total"))+"\nالمدفوع: "+money(x.optDouble("paid"))+"\nالمتبقي: "+money(x.optDouble("remaining"))
+ private fun invoiceHtml(x:JSONObject):String{val pairs=listOf("رقم الفاتورة" to x.optInt("number"),"المشترك" to x.optString("name"),"رقم العداد" to x.optString("meter"),"التاريخ" to date(x.optLong("date")),"القراءة السابقة" to x.optDouble("prev"),"القراءة الحالية" to x.optDouble("curr"),"الاستهلاك بالكيلو" to x.optDouble("cons"),"سعر الكيلو" to money(x.optDouble("price")),"قيمة الاستهلاك" to money(x.optDouble("energy")),"المتأخرات السابقة" to money(x.optDouble("oldArrears")),"الخصم" to money(x.optDouble("discount")),"الرصيد المستخدم" to money(x.optDouble("creditUsed")),"الإجمالي" to money(x.optDouble("total")),"المدفوع" to money(x.optDouble("paid")),"المتبقي" to money(x.optDouble("remaining")));return "<html><meta charset='utf-8'><body dir='rtl' style='font-family:sans-serif;color:#17324d;padding:14px'><h2 style='text-align:center'>"+settings().optString("station")+"</h2><h3 style='text-align:center'>فاتورة كهرباء</h3>"+pairs.joinToString(""){"<p style='border-bottom:1px solid #ddd;padding:6px'><b>"+it.first+"</b>: "+it.second+"</p>"}+"<p style='text-align:center'>شكرًا لتعاملكم معنا</p></body></html>"}
+ private fun showInvoice(x:JSONObject){val w=android.webkit.WebView(this);w.settings.defaultTextEncodingName="UTF-8";w.loadDataWithBaseURL(null,invoiceHtml(x),"text/html","UTF-8",null);val box=LinearLayout(this).apply{orientation=1;addView(w,lp(-1,dp(420))};AlertDialog.Builder(this).setTitle("فاتورة #"+x.optInt("number")).setView(box).setNegativeButton("إغلاق",null).setNeutralButton("واتساب"){_,_->share(invoiceText(x),x.optString("phone"))}.setPositiveButton("طباعة"){_,_->printHtml(invoiceHtml(x),"فاتورة-"+x.optInt("number"))}.show()}
+ private fun printHtml(html:String,name:String){val w=android.webkit.WebView(this);w.webViewClient=object:android.webkit.WebViewClient(){override fun onPageFinished(v:android.webkit.WebView?,url:String?){val pm=getSystemService(Context.PRINT_SERVICE) as android.print.PrintManager;pm.print(name,v!!.createPrintDocumentAdapter(name),android.print.PrintAttributes.Builder().build())}};w.loadDataWithBaseURL(null,html,"text/html","UTF-8",null)}
+ private fun share(msg:String,phone:String){try{startActivity(Intent(Intent.ACTION_SEND).apply{type="text/plain";setPackage("com.whatsapp");putExtra(Intent.EXTRA_TEXT,msg)})}catch(e:Exception){try{startActivity(Intent(Intent.ACTION_VIEW,Uri.parse("https://wa.me/"+phone.filter{it.isDigit()}+"?text="+Uri.encode(msg))))}catch(_:Exception){Toast.makeText(this,"تعذر فتح واتساب",Toast.LENGTH_SHORT).show()}}}
+ private fun receiptForm(){val a=data("customers");if(a.length()==0){Toast.makeText(this,"أضف مشتركًا أولًا",Toast.LENGTH_SHORT).show();return};val cs=(0 until a.length()).mapNotNull{a.optJSONObject(it)};val box=LinearLayout(this).apply{orientation=1};val sp=Spinner(this);sp.adapter=ArrayAdapter(this,android.R.layout.simple_spinner_dropdown_item,cs.map{it.optString("name")+" — "+it.optString("meter")});val amount=field("المبلغ المستلم","",true);val method=Spinner(this);method.adapter=ArrayAdapter(this,android.R.layout.simple_spinner_dropdown_item,listOf("نقدًا","تحويل","أخرى"));box.addView(label("المشترك"));box.addView(sp);box.addView(label("المبلغ المستلم"));box.addView(amount);box.addView(label("طريقة الدفع"));box.addView(method);val d=AlertDialog.Builder(this).setTitle("تسجيل تحصيل").setView(box).setNegativeButton("إلغاء",null).setPositiveButton("حفظ الإيصال",null).create();d.setOnShowListener{d.getButton(-1).setOnClickListener{val c=cs.getOrNull(sp.selectedItemPosition)?:return@setOnClickListener;val pay=amount.text.toString().toDoubleOrNull();if(pay==null||pay<=0){amount.error="أدخل مبلغًا صحيحًا";return@setOnClickListener};val before=c.optDouble("arrears");val after=(before-pay).coerceAtLeast(0.0);val excess=(pay-before).coerceAtLeast(0.0);c.put("arrears",after).put("credit",c.optDouble("credit")+excess);val st=settings();val num=st.optInt("nextReceipt",1);st.put("nextReceipt",num+1);saveSettings(st);val r=JSONObject().put("id",id()).put("number",num).put("subId",c.optString("id")).put("name",c.optString("name")).put("meter",c.optString("meter")).put("phone",c.optString("phone")).put("date",System.currentTimeMillis()).put("before",before).put("paid",pay).put("after",after).put("excess",excess).put("method",method.selectedItem.toString());val ra=data("receipts");ra.put(r);save("receipts",ra);save("customers",a);d.dismiss();showReceipt(r)}};d.show()}
+ private fun receiptsPage(){heading("التحصيل والإيصالات","سجل عمليات القبض");body.addView(btn("＋ تسجيل تحصيل",{receiptForm()},orange),lp(-1,dp(45),8));val a=data("receipts");if(a.length()==0)body.addView(empty("لا توجد إيصالات","تظهر عمليات التحصيل هنا."),lp(-1,-2,8));for(i in a.length()-1 downTo 0){val r=a.optJSONObject(i)?:continue;val c=card();c.addView(label("إيصال #"+r.optInt("number")+" • "+r.optString("name"),16f,ink,true));c.addView(label(date(r.optLong("date")),12f,muted));line(c,"المبلغ",money(r.optDouble("paid")));line(c,"المتبقي",money(r.optDouble("after")));c.addView(btn("عرض / طباعة / واتساب"){showReceipt(r)},lp(-1,dp(42),8));body.addView(c,lp(-1,-2,8))}}
+ private fun showReceipt(r:JSONObject){AlertDialog.Builder(this).setTitle("إيصال قبض #"+r.optInt("number")).setMessage(settings().optString("station")+"\nالمشترك: "+r.optString("name")+"\nالمبلغ: "+money(r.optDouble("paid"))+"\nالمتبقي: "+money(r.optDouble("after"))+"\nطريقة الدفع: "+r.optString("method")).setNegativeButton("إغلاق",null).setNeutralButton("واتساب"){_,_->share("إيصال قبض #"+r.optInt("number")+"\nالمشترك: "+r.optString("name")+"\nالمبلغ: "+money(r.optDouble("paid"))+"\nالمتبقي: "+money(r.optDouble("after")),r.optString("phone"))}.setPositiveButton("طباعة"){_,_->printHtml("<html><meta charset='utf-8'><body dir='rtl'><h2>"+settings().optString("station")+"</h2><h3>إيصال قبض #"+r.optInt("number")+"</h3><p>المشترك: "+r.optString("name")+"</p><p>المبلغ: "+money(r.optDouble("paid"))+"</p><p>المتبقي: "+money(r.optDouble("after"))+"</p></body></html>","إيصال-"+r.optInt("number"))}.show()}
+ private fun statementPage(){val c=find(data("customers"),"id",chosen);if(c==null){heading("كشف الحساب","اختر مشتركًا من صفحة المشتركين.");return};heading("كشف حساب المشترك",c.optString("name"));line(body,"رقم العداد",c.optString("meter"));val ia=data("invoices");val ra=data("receipts");var total=0.0;var paid=0.0;body.addView(label("الفواتير",17f,ink,true),lp(-1,-2,12));for(i in 0 until ia.length()){val x=ia.optJSONObject(i)?:continue;if(x.optString("subId")!=chosen)continue;total+=x.optDouble("total");paid+=x.optDouble("paid");body.addView(invoiceCard(x),lp(-1,-2,8))};body.addView(label("الإيصالات",17f,ink,true),lp(-1,-2,12));for(i in ra.length()-1 downTo 0){val x=ra.optJSONObject(i)?:continue;if(x.optString("subId")!=chosen)continue;val cc=card();cc.addView(label("إيصال #"+x.optInt("number")+" • "+date(x.optLong("date")),14f,ink,true));line(cc,"المبلغ",money(x.optDouble("paid")));body.addView(cc,lp(-1,-2,8))};val sum=card();line(sum,"إجمالي الفواتير",money(total));line(sum,"المدفوع عند إصدار الفواتير",money(paid));line(sum,"المتأخرات الحالية",money(c.optDouble("arrears")));line(sum,"الرصيد الدائن",money(c.optDouble("credit")));sum.addView(btn("مشاركة كشف الحساب عبر واتساب"){share("كشف حساب "+c.optString("name")+"\nالعداد: "+c.optString("meter")+"\nإجمالي الفواتير: "+money(total)+"\nالمدفوع: "+money(paid)+"\nالمتأخرات: "+money(c.optDouble("arrears"))+"\nالرصيد الدائن: "+money(c.optDouble("credit")),c.optString("phone"))},lp(-1,dp(42),8));body.addView(sum,lp(-1,-2,12))}
+ private fun reportsPage(){heading("التقارير المالية","ملخص النشاط المالي");val ia=data("invoices");val ra=data("receipts");var total=0.0;var paid=0.0;var due=0.0;var receipts=0.0;for(i in 0 until ia.length()){val x=ia.optJSONObject(i)?:continue;total+=x.optDouble("total");paid+=x.optDouble("paid");due+=x.optDouble("remaining")};for(i in 0 until ra.length())receipts+=ra.optJSONObject(i)?.optDouble("paid")?:0.0;val c=card();line(c,"عدد المشتركين",data("customers").length().toString());line(c,"عدد الفواتير",ia.length().toString());line(c,"عدد الإيصالات",ra.length().toString());line(c,"إجمالي الفواتير",money(total));line(c,"المدفوع في الفواتير",money(paid));line(c,"إجمالي إيصالات التحصيل",money(receipts));line(c,"المتبقي على الفواتير",money(due));body.addView(c,lp(-1,-2,8))}
+ private fun settingsPage(){heading("الإعدادات","بيانات النشاط والنسخ الاحتياطي");val s=settings();val c=card();val station=field("اسم النشاط",s.optString("station"));val price=field("سعر الكيلو الافتراضي",s.optDouble("price").toString(),true);val due=field("أيام الاستحقاق",s.optInt("dueDays").toString(),true);val next=field("رقم الفاتورة التالية",s.optInt("nextInvoice").toString(),true);listOf("اسم النشاط" to station,"سعر الكيلو الافتراضي" to price,"أيام الاستحقاق" to due,"رقم الفاتورة التالية" to next).forEach{c.addView(label(it.first,12f,muted));c.addView(it.second,lp(-1,dp(44),2))};c.addView(btn("حفظ الإعدادات"){s.put("station",station.text.toString()).put("price",price.text.toString().toDoubleOrNull()?:170.0).put("dueDays",due.text.toString().toIntOrNull()?:15).put("nextInvoice",next.text.toString().toIntOrNull()?:1);saveSettings(s);Toast.makeText(this,"تم حفظ الإعدادات",Toast.LENGTH_SHORT).show();render()},lp(-1,dp(44),10));body.addView(c,lp(-1,-2,8));val b=card();b.addView(label("النسخ الاحتياطي التلقائي كل 24 ساعة",17f,ink,true));b.addView(label("تُحفظ النسخة داخل مجلد التطبيق، ويمكن تحديد مجلد خارجي لاستمرار حفظ النسخ فيه.",13f,muted),lp(-1,-2,6));b.addView(btn("تحديد مجلد النسخ",Color.rgb(65,87,124)){startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE),folderReq)},lp(-1,dp(44),10));b.addView(btn("إنشاء نسخة الآن"){Toast.makeText(this,if(writeBackup())"تم إنشاء النسخة" else "تعذر إنشاء النسخة",Toast.LENGTH_LONG).show()},lp(-1,dp(44),8));b.addView(btn("استعادة نسخة JSON",orange){startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply{addCategory(Intent.CATEGORY_OPENABLE);type="application/json"},restoreReq)},lp(-1,dp(44),8));body.addView(b,lp(-1,-2,12))}
+ private fun backupJson()=JSONObject().put("app","الكامل للفواتير والتحصيل").put("version","2.0.0").put("createdAt",System.currentTimeMillis()).put("settings",settings()).put("customers",data("customers")).put("invoices",data("invoices")).put("receipts",data("receipts"))
+ private fun backupName()="alkamel_backup"+SimpleDateFormat("yyyy-MM-dd_HH-mm-ss",Locale.US).format(Date())+".json"
+ private fun writeBackup():Boolean=try{val dir=File(getExternalFilesDir(null),"Backups");if(!dir.exists())dir.mkdirs();val json=backupJson().toString(2);File(dir,backupName()).writeText(json);writeSelected(json);true}catch(e:Exception){false}
+ private fun writeSelected(json:String){val raw=p.getString("backup_tree_uri",null)?:return;try{val tree=Uri.parse(raw);val doc=android.provider.DocumentsContract.buildDocumentUriUsingTree(tree,android.provider.DocumentsContract.getTreeDocumentId(tree));val f=android.provider.DocumentsContract.createDocument(contentResolver,doc,"application/json",backupName())?:return;contentResolver.openOutputStream(f)?.use{it.write(json.toByteArray(Charsets.UTF_8))}}catch(e:Exception){}}
+ private fun scheduleBackup(){val req=PeriodicWorkRequestBuilder<BackupWorker>(24,TimeUnit.HOURS).build();WorkManager.getInstance(this).enqueueUniquePeriodicWork("alkamel_daily_backup",ExistingPeriodicWorkPolicy.KEEP,req)}
+ override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?){super.onActivityResult(requestCode,resultCode,data);if(resultCode!=RESULT_OK||data?.data==null)return;val uri=data.data!!;try{if(requestCode==folderReq){contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION);p.edit().putString("backup_tree_uri",uri.toString()).apply();writeBackup();Toast.makeText(this,"تم تحديد مجلد النسخ",Toast.LENGTH_LONG).show()}else if(requestCode==restoreReq){val o=contentResolver.openInputStream(uri)?.bufferedReader()?.use{JSONObject(it.readText())}?:throw Exception("ملف غير صالح");if(!o.has("customers")||!o.has("invoices"))throw Exception("ملف النسخة غير صالح");save("customers",o.optJSONArray("customers")?:JSONArray());save("invoices",o.optJSONArray("invoices")?:JSONArray());save("receipts",o.optJSONArray("receipts")?:JSONArray());saveSettings(o.optJSONObject("settings")?:JSONObject());Toast.makeText(this,"تمت استعادة النسخة",Toast.LENGTH_LONG).show();render()}}catch(e:Exception){Toast.makeText(this,"تعذر إكمال العملية: "+e.message,Toast.LENGTH_LONG).show()}}
+}
+class BackupWorker(ctx:android.content.Context,params:WorkerParameters):Worker(ctx,params){
+ override fun doWork():Result=try{val p=applicationContext.getSharedPreferences("alkamel_db",android.content.Context.MODE_PRIVATE);val o=JSONObject().put("app","الكامل للفواتير والتحصيل").put("version","2.0.0").put("createdAt",System.currentTimeMillis()).put("settings",JSONObject(p.getString("settings","{}")?:"{}")).put("customers",JSONArray(p.getString("customers","[]")?:"[]")).put("invoices",JSONArray(p.getString("invoices","[]")?:"[]")).put("receipts",JSONArray(p.getString("receipts","[]")?:"[]"));val json=o.toString(2);val dir=File(applicationContext.getExternalFilesDir(null),"Backups");if(!dir.exists())dir.mkdirs();File(dir,"alkamel_backup"+SimpleDateFormat("yyyy-MM-dd_HH-mm-ss",Locale.US).format(Date())+".json").writeText(json);val raw=p.getString("backup_tree_uri",null);if(raw!=null)try{val tree=Uri.parse(raw);val doc=android.provider.DocumentsContract.buildDocumentUriUsingTree(tree,android.provider.DocumentsContract.getTreeDocumentId(tree));val f=android.provider.DocumentsContract.createDocument(applicationContext.contentResolver,doc,"application/json","alkamel_backup"+SimpleDateFormat("yyyy-MM-dd_HH-mm-ss",Locale.US).format(Date())+".json");if(f!=null)applicationContext.contentResolver.openOutputStream(f)?.use{it.write(json.toByteArray(Charsets.UTF_8))}}catch(e:Exception){};Result.success()}catch(e:Exception){Result.retry()}
 }
