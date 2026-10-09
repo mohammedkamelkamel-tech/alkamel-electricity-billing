@@ -9,8 +9,8 @@ android {
         applicationId = "ye.alkamel.billing"
         minSdk = 23
         targetSdk = 35
-        versionCode = 5
-        versionName = "2.2.0"
+        versionCode = 6
+        versionName = "2.3.0"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
