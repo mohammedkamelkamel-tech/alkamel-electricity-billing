@@ -39,7 +39,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
             setPadding(4, 12, 4, 18)
         }, matchWrap())
-        nameInput = EditText(this).apply { hint = "اسم المشترك"; textSize = 16f; singleLine = true }
+        nameInput = EditText(this).apply { hint = "اسم المشترك"; textSize = 16f; setSingleLine(true) }
         root.addView(nameInput, matchWrap())
         amountInput = EditText(this).apply {
             hint = "قيمة الفاتورة (ريال)"
