@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 390">
+  <g stroke-linejoin="round">
+    <path d="M45 120 L180 20 L315 120 L295 140 L180 55 L65 140 Z" fill="#0878df" stroke="#0758b8" stroke-width="4"/>
+    <path d="M75 125 V220 H285 V125" fill="none" stroke="#0878df" stroke-width="13"/>
+    <rect x="108" y="112" width="25" height="25" rx="4" fill="#0786f2"/><rect x="139" y="112" width="25" height="25" rx="4" fill="#0786f2"/>
+    <rect x="108" y="143" width="25" height="25" rx="4" fill="#0786f2"/><rect x="139" y="143" width="25" height="25" rx="4" fill="#0786f2"/>
+    <path d="M195 88 L135 190 H180 L155 265 L235 155 H190 Z" fill="#f4b400" stroke="#e99500" stroke-width="4"/>
+    <path d="M45 245 Q180 320 315 245" fill="none" stroke="#0878df" stroke-width="12"/>
+    <text x="180" y="310" text-anchor="middle" font-size="48" font-weight="bold" font-family="sans-serif" fill="#0758b8">العجاج</text>
+    <text x="180" y="350" text-anchor="middle" font-size="23" font-weight="bold" font-family="sans-serif" fill="#d99100">للفواتير والتحصيل</text>
+  </g>
+</svg>
